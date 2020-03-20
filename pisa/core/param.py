@@ -316,29 +316,54 @@ class Param:
     def _rescaled_value(self):
         if self.is_discrete:
             return self.value
-        srange = self.range
-        if srange is None:
-            raise ValueError('Cannot rescale without a range specified'
-                             ' for parameter %s' % self)
-        srange = self.range
-        srange0 = srange[0].m
-        srange1 = srange[1].m
-        return (self._value.m - srange0) / (srange1 - srange0)
+        return self.original_to_rescaled(self.value)
 
     @_rescaled_value.setter
     def _rescaled_value(self, rval):
+        self._value = self.rescaled_to_original(rval)
+
+    def rescaled_to_original(self, rval):
+        """
+        Calculate value in original paremeter dimensions given a
+        rescaled float value between 0 and 1 (as used in optimizers)
+
+        Parameters:
+        -----------
+
+        rval : float or array
+        """
         srange = self.range
         if srange is None:
             raise ValueError('Cannot rescale without a range specified'
                              ' for parameter %s' % self)
-        if rval < 0 or rval > 1:
+        if np.any(rval < 0) or np.any(rval > 1):
             raise ValueError(
                 '%s: `rval`=%.15e, but cannot be outside [0, 1]'
                 % (self.name, rval)
             )
         srange0 = srange[0].m
         srange1 = srange[1].m
-        self._value = (srange0 + (srange1 - srange0)*rval) * self._units
+        return (srange0 + (srange1 - srange0)*rval) * self._units
+
+    def original_to_rescaled(self, val):
+        """
+        Calculate rescaled value of a paremetr value
+        will return a float number between 0 and 1 (as used in optimizers)
+
+        Parameters:
+        -----------
+
+        val : Quantity
+        """
+        srange = self.range
+        if srange is None:
+            raise ValueError('Cannot rescale without a range specified'
+                             ' for parameter %s' % self)
+        srange = self.range
+        srange0 = srange[0].m
+        srange1 = srange[1].m
+        return (val.m - srange0) / (srange1 - srange0)
+
 
     @property
     def tex(self):
@@ -411,8 +436,41 @@ class Param:
 
         """
         random = get_random_state(random_state)
-        rand = random.rand()
-        self._rescaled_value = rand
+        rv = random.rand()
+        self._rescaled_value = rv
+
+    def randomize_with_prior(self, random_state=None):
+        """Randomize the parameter's value according to its random
+        distribution within the parameter's defined limits.
+
+        Parameters
+        ----------
+        random_state : None, int, or RandomState
+            Object to use for random state. None defaults to the global random
+            state (this is discouraged, as results are not reproducible). An
+            integer acts as a seed to `numpy.random.seed()`, and RandomState is
+            a `numpy.random.RandomState` object.
+
+        """
+
+        if self.prior is None:
+            self.randomize(random_state)
+        elif self.prior.kind == 'uniform':
+            self.randomize(random_state)
+        elif self.prior.kind == 'gaussian':
+            random = get_random_state(random_state)
+            rv = np.inf
+            for i in range(1000):
+                rv = random.normal(loc=self.prior.mean.m, scale=self.prior.stddev.m)
+                try:
+                    self.value = rv * self._units
+                except ValueError:
+                    pass
+                else:
+                    return
+            logging.error('Unable to generate random variate in 1000 tries')
+        else:
+            raise NotImplementedError('Random values distributed according to %s prior not Implemented.'%self.prior.kind)
 
     def prior_penalty(self, metric):
         """Return the prior penalty according to `metric`.
@@ -922,7 +980,7 @@ class ParamSet(Sequence):
         """Define the nominal values as the parameters' current values."""
         self.nominal_values = self.values
 
-    def randomize_free(self, random_state=None):
+    def randomize_free(self, random_state=None, use_priors=False):
         """Randomize any free parameters with according to a uniform random
         distribution within the parameters' defined limits.
 
@@ -934,11 +992,14 @@ class ParamSet(Sequence):
             integer acts as a seed to `numpy.random.seed()`, and RandomState is
             a `numpy.random.RandomState` object.
 
+        use_priors : bool
+            if True, randomize according to prior
         """
-        random = get_random_state(random_state)
-        n = len(self.free)
-        rand = random.rand(n)
-        self.free._rescaled_values = rand
+        for param in self.free:
+            if use_priors:
+                param.randomize_with_prior(random_state)
+            else:
+                param.randomize(random_state)
 
     @property
     def _rescaled_values(self):

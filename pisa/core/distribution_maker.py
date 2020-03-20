@@ -333,6 +333,21 @@ class DistributionMaker(object):
                         ' fixed in at least one pipeline' %name
                     )
 
+    def _set_baseunits_free_params(self, basevalues):
+        """Set free param values given a simple list of flating point,
+        dimensionless values. Use baseunits of parameters
+
+        """
+        names = self.params.free.names
+        for pipeline in self:
+            for name, basevalue in zip(names, basevalues):
+                if name in pipeline.params.free.names:
+                    pipeline.params[name].value = basevalue * pipeline.params[name].value.to_base_units().u
+                elif name in pipeline.params.names:
+                    raise AttributeError(
+                        'Trying to set value for "%s", a parameter that is'
+                        ' fixed in at least one pipeline' %name
+                    )
 
 def test_DistributionMaker():
     """Unit tests for DistributionMaker"""
