@@ -24,7 +24,7 @@ from pisa.core.param import ParamSet
 from pisa.utils.comparisons import recursiveEquality
 from pisa.utils.log import logging
 from pisa.utils.fileio import to_file
-from pisa.utils.stats import METRICS_TO_MAXIMIZE, METRICS_TO_MINIMIZE
+from pisa.utils.stats import METRICS_TO_MAXIMIZE, METRICS_TO_MINIMIZE, CHI2_METRICS, LLH_METRICS
 
 
 __all__ = ['MINIMIZERS_USING_SYMM_GRAD',
@@ -993,12 +993,12 @@ class Analysis(object):
         # so flip sign of metric in those cases.
         if isinstance(metric, str):
             metric = [metric]
-        sign = 0
+        factor = 0
         for m in metric:
-            if m in METRICS_TO_MAXIMIZE and sign != +1:
-                sign = 1
-            elif m in METRICS_TO_MINIMIZE and sign != -1:
-                sign = -1
+            if m in LLH_METRICS and factor != +1:
+                factor = 1
+            elif m in CHI2_METRICS and factor != -1:
+                factor = -0.5
             else:
                 raise ValueError('Defined metrics are not compatible')
 
@@ -1079,7 +1079,7 @@ class Analysis(object):
 
         counter += 1
 
-        return sign*metric_val
+        return factor*metric_val
 
     def _minimizer_callable(self, scaled_param_vals, hypo_maker, data_dist,
                             metric, counter, fit_history, pprint, blind, external_priors_penalty=None):
