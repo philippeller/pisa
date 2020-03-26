@@ -950,8 +950,7 @@ class ParamSet(Sequence):
         penalty : float sum of all parameters' prior values
 
         """
-        return np.sum([obj.prior_penalty(metric=metric)
-                       for obj in self._params])
+        return np.sum(self.priors_penalties(metric))
 
     def priors_penalties(self, metric):
         """Return the prior penalties for each param at their current values.

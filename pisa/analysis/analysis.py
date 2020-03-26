@@ -950,7 +950,7 @@ class Analysis(object):
         return detailed_metric_info
 
     def log_prob(self, scaled_param_vals, hypo_maker, data_dist, metric, counter,  
-            pprint, blind, external_priors_penalty=None):
+            pprint, blind):
         """log probability for use with MCMC sampler
 
         Parameters
@@ -972,7 +972,7 @@ class Analysis(object):
             pseudo-data distribution (where the latter two are derived from
             simulation and so aren't technically "data").
 
-        metric : string or iterable of strings
+        metric : string 
             Metric by which to evaluate the fit. See Map
 
         counter : Counter
@@ -985,9 +985,6 @@ class Analysis(object):
 
         blind : bool
 
-        external_priors_penalty : func
-            User defined prior penalty function
-
         """
         # Want to *maximize* e.g. log-likelihood but we're using a minimizer,
         # so flip sign of metric in those cases.
@@ -995,9 +992,9 @@ class Analysis(object):
             metric = [metric]
         factor = 0
         for m in metric:
-            if m in LLH_METRICS and factor != +1:
+            if m in LLH_METRICS:
                 factor = 1
-            elif m in CHI2_METRICS and factor != -1:
+            elif m in CHI2_METRICS:
                 factor = -0.5
             else:
                 raise ValueError('Defined metrics are not compatible')
