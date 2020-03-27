@@ -1,5 +1,5 @@
 """
-Stage to apply pre-calculated Genie uncertainties
+Stage to apply pre-calculated DIS uncertainties
 """
 
 from __future__ import absolute_import, print_function, division
@@ -18,7 +18,7 @@ from pisa.utils.numba_tools import WHERE
 
 class dis_sys(PiStage): # pylint: disable=invalid-name
     """
-    Stage to apply pre-calculated Genie systematics.
+    Stage to apply pre-calculated DIS systematics.
 
     Parameters
     ----------
@@ -40,7 +40,8 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
     Notes
     -----
     Requires the events have the following keys ::
-
+        true_energy
+            Neutrino energy in GeV
         bjorken_y
             Inelasticity
         dis
@@ -60,14 +61,15 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
         extrapolation_type='constant',
     ):
         expected_params = (
-            'DIS',
+            'dis_csms',
         )
         input_names = ()
         output_names = ()
 
         # what are the keys used from the inputs during apply
         input_apply_keys = (
-            'xsec_csms',
+            'dis_correction_total',
+            'dis_correction_diff',
         )
         # what keys are added or altered for the outputs during apply
         output_apply_keys = (
@@ -98,18 +100,17 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
     @profile
     def setup_function(self):
 
-        extrap_dict = from_file('tot_xsec_corr_Q2min1_isoscalar.pckl')
+        extrap_dict = from_file('cross_sections/tot_xsec_corr_Q2min1_isoscalar.pckl')
 
         # load splines
-        wf_nucc =    from_file('NuMu_CC_flat.pckl')
-        wf_nubarcc = from_file('NuMu_Bar_CC_flat.pckl')
-        wf_nunc =    from_file('NuMu_NC_flat.pckl')
-        wf_nubarnc = from_file('NuMu_Bar_NC_flat.pckl')
+        wf_nucc =    from_file('cross_sections/dis_csms_splines_flat/NuMu_CC_flat.pckl')
+        wf_nubarcc = from_file('cross_sections/dis_csms_splines_flat/NuMu_Bar_CC_flat.pckl')
+        wf_nunc =    from_file('cross_sections/dis_csms_splines_flat/NuMu_NC_flat.pckl')
+        wf_nubarnc = from_file('cross_sections/dis_csms_splines_flat/NuMu_Bar_NC_flat.pckl')
 
+        # set this to events mode, as we need the per-event info to calculate these weights
+        self.data.data_specs = 'events'
 
-        # TODO: only for DIS events!!
-
-        
         for container in self.data:
 
             # creat keys for external dict
@@ -124,6 +125,7 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
 
             lgE = np.log10(container['true_energy'].get('host'))
             bjorken_y = container['bjorken_y'].get('host')
+            dis = container['dis'].get('host')
 
             #
             # Calculate variation of total cross section
@@ -148,6 +150,10 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
                 w_tot[mask] = np.polyval(poly_coef, lgE[mask]) 
             else:
                 raise ValueError('Unknown extrapolation type "%s"'%self.extrapolation_type)
+
+            # mke centered arround 0, and set to 0 for all non-DIS events
+            w_tot -= 1
+            w_tot *= dis
           
             container["dis_correction_total"] = w_tot
 
@@ -171,43 +177,37 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
 
             w_diff[~mask] = weight_func.ev(lgE[~mask], bjorken_y[~mask])
             w_diff[mask] = weight_func.ev(w_diff[mask] * lgE_min, bjorken_y[mask])
+
+            # mke centered arround 0, and set to 0 for all non-DIS events
+            w_diff -= 1
+            w_diff *= dis
             
             container["dis_correction_diff"] = w_diff
          
 
     @profile
     def apply_function(self):
-        dis_ma_qe = self.params.Genie_Ma_QE.m_as('dimensionless')
-        dis_ma_res = self.params.Genie_Ma_RES.m_as('dimensionless')
+        dis_csms = self.params.dis_csms.m_as('dimensionless')
 
         for container in self.data:
             apply_dis_sys(
-                dis_ma_qe,
-                container['linear_fit_maccqe'].get(WHERE),
-                container['quad_fit_maccqe'].get(WHERE),
-                dis_ma_res,
-                container['linear_fit_maccres'].get(WHERE),
-                container['quad_fit_maccres'].get(WHERE),
+                container['dis_correction_total'].get(WHERE),
+                container['dis_correction_diff'].get(WHERE),
+                dis_csms,
                 out=container['weights'].get(WHERE),
             )
             container['weights'].mark_changed(WHERE)
 
 
 if FTYPE == np.float64:
-    SIGNATURE = '(f8, f8, f8, f8, f8, f8, f8[:])'
+    SIGNATURE = '(f8, f8, f8, f8[:])'
 else:
-    SIGNATURE = '(f4, f4, f4, f4, f4, f4, f4[:])'
-@guvectorize([SIGNATURE], '(),(),(),(),(),()->()', target=TARGET)
+    SIGNATURE = '(f4, f4, f4, f4[:])'
+@guvectorize([SIGNATURE], '(),(),()->()', target=TARGET)
 def apply_dis_sys(
-    dis_ma_qe,
-    linear_fit_maccqe,
-    quad_fit_maccqe,
-    dis_ma_res,
-    linear_fit_maccres,
-    quad_fit_maccres,
+    dis_correction_total,
+    dis_correction_diff,
+    dis_csms,
     out,
 ):
-    out[0] *= (
-        (1. + (linear_fit_maccqe + quad_fit_maccqe * dis_ma_qe) * dis_ma_qe)
-        * (1. + (linear_fit_maccres + quad_fit_maccres * dis_ma_res) * dis_ma_res)
-    )
+    out[0] *= (1. + dis_correction_total * dis_csms) * (1. + dis_correction_diff * dis_csms) 
