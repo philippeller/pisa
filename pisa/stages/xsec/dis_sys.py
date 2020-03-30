@@ -1,5 +1,8 @@
 """
 Stage to apply pre-calculated DIS uncertainties
+Study done by Maria Liubarska & Juan Pablo Yanez, more information available here:
+https://drive.google.com/open?id=1SRBgIyX6kleYqDcvop6m0SInToAVhSX6
+ToDo: tech note being written, link here as soon as available
 """
 
 from __future__ import absolute_import, print_function, division
@@ -27,8 +30,8 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
         Must contain ::
             dis_csms : quantity (dimensionless)
 
-        extrapolation_type : string
-            choice of ['constant', 'linear', 'higher']
+    extrapolation_type : string
+        choice of ['constant', 'linear', 'higher']
 
     input_names
     output_names
@@ -103,9 +106,9 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
         extrap_dict = from_file('cross_sections/tot_xsec_corr_Q2min1_isoscalar.pckl')
 
         # load splines
-        wf_nucc =    from_file('cross_sections/dis_csms_splines_flat/NuMu_CC_flat.pckl')
+        wf_nucc = from_file('cross_sections/dis_csms_splines_flat/NuMu_CC_flat.pckl')
         wf_nubarcc = from_file('cross_sections/dis_csms_splines_flat/NuMu_Bar_CC_flat.pckl')
-        wf_nunc =    from_file('cross_sections/dis_csms_splines_flat/NuMu_NC_flat.pckl')
+        wf_nunc = from_file('cross_sections/dis_csms_splines_flat/NuMu_NC_flat.pckl')
         wf_nubarnc = from_file('cross_sections/dis_csms_splines_flat/NuMu_Bar_NC_flat.pckl')
 
         # set this to events mode, as we need the per-event info to calculate these weights
@@ -127,42 +130,45 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             bjorken_y = container['bjorken_y'].get('host')
             dis = container['dis'].get('host')
 
+            w_tot = np.ones_like(lgE)
+
             #
             # Calculate variation of total cross section
             #
 
             lgE_min = 2. if self.extrapolation_type == 'constant' else 1.68
-            mask = lgE <= lgE_min
 
-            w_tot = np.ones_like(lgE)
-            
             poly_coef = extrap_dict[nu][current]['poly_coef']
-            w_tot[~mask] = np.polyval(poly_coef, lgE[~mask])
-           
-            if self.extrapolation_type == 'constant':
-                poly_coef = extrap_dict[nu][current]['poly_coef']
-                w_tot[mask] = np.polyval(poly_coef, lgE_min * w_tot[mask]) 
-            elif self.extrapolation_type == 'linear':
-                lin_coef = extrap_dict[nu][current]['linear']
-                w_tot[mask] = np.polyval(lin_coef, lgE[mask])
-            elif self.extrapolation_type == 'higher':
-                poly_coef = extrap_dict[nu][current]['poly_coef']
-                w_tot[mask] = np.polyval(poly_coef, lgE[mask]) 
-            else:
-                raise ValueError('Unknown extrapolation type "%s"'%self.extrapolation_type)
+            lin_coef = extrap_dict[nu][current]['linear']
 
-            # mke centered arround 0, and set to 0 for all non-DIS events
-            w_tot -= 1
-            w_tot *= dis
+            if self.extrapolation_type == 'higher':
+                w_tot = np.polyval(poly_coef, lgE)
+            else:
+                poly_valid_mask = lgE >= lgE_min
+                extrapolation_mask = ~poly_valid_mask
+
+                w_tot[poly_valid_mask] = np.polyval(poly_coef, lgE[poly_valid_mask])
+
+                if self.extrapolation_type == 'constant':
+                    w_tot[extrapolation_mask] = np.polyval(poly_coef, lgE_min)  # note Numpy broadcasts
+                elif self.extrapolation_type == 'linear':
+                    w_tot[extrapolation_mask] = np.polyval(lin_coef, lgE[extrapolation_mask])
+                else:
+                    raise ValueError('Unknown extrapolation type "%s"'%self.extrapolation_type)
+
+            # make centered arround 0, and set to 0 for all non-DIS events
+            w_tot = (w_tot - 1) * dis
           
             container["dis_correction_total"] = w_tot
+            container['dis_correction_total'].mark_changed('host')
 
             #
             # Calculate variation of differential cross section
             #
 
             lgE_min = 2.
-            mask = lgE <= lgE_min
+            spline_valid_mask = lgE >= lgE_min
+            extrapolation_mask = ~spline_valid_mask
 
             w_diff = np.ones_like(lgE)
 
@@ -175,14 +181,14 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             elif current == 'NC' and container['nubar'] < 0:
                 weight_func = wf_nubarnc
 
-            w_diff[~mask] = weight_func.ev(lgE[~mask], bjorken_y[~mask])
-            w_diff[mask] = weight_func.ev(w_diff[mask] * lgE_min, bjorken_y[mask])
+            w_diff[spline_valid_mask] = weight_func.ev(lgE[spline_valid_mask], bjorken_y[spline_valid_mask ])
+            w_diff[extrapolation_mask] = weight_func.ev(w_diff[extrapolation_mask] * lgE_min, bjorken_y[extrapolation_mask])
 
-            # mke centered arround 0, and set to 0 for all non-DIS events
-            w_diff -= 1
-            w_diff *= dis
+            # make centered arround 0, and set to 0 for all non-DIS events
+            w_diff = (w_diff - 1) * dis
             
             container["dis_correction_diff"] = w_diff
+            container['dis_correction_diff'].mark_changed('host')
          
 
     @profile
@@ -193,17 +199,15 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             apply_dis_sys(
                 container['dis_correction_total'].get(WHERE),
                 container['dis_correction_diff'].get(WHERE),
-                dis_csms,
+                FTYPE(dis_csms),
                 out=container['weights'].get(WHERE),
             )
             container['weights'].mark_changed(WHERE)
 
 
-if FTYPE == np.float64:
-    SIGNATURE = '(f8, f8, f8, f8[:])'
-else:
-    SIGNATURE = '(f4, f4, f4, f4[:])'
-@guvectorize([SIGNATURE], '(),(),()->()', target=TARGET)
+FX = 'f8' if FTYPE == np.float64 else 'f4'
+
+@guvectorize([f'({FX}, {FX}, {FX}, {FX}[:])'], '(),(),()->()', target=TARGET)
 def apply_dis_sys(
     dis_correction_total,
     dis_correction_diff,
