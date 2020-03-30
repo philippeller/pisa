@@ -33,6 +33,10 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
     extrapolation_type : string
         choice of ['constant', 'linear', 'higher']
 
+    extrapolation_energy_threshold : float
+        Below what energy (in GeV) to extrapolate
+        Defaults to 100. CSMS not considered reliable below 50-100 GeV
+
     input_names
     output_names
     debug_mode
@@ -62,6 +66,7 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
         calc_specs=None,
         output_specs=None,
         extrapolation_type='constant',
+        extrapolation_energy_threshold=100,
     ):
         expected_params = (
             'dis_csms',
@@ -99,6 +104,7 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
         assert self.output_mode is not None
 
         self.extrapolation_type = extrapolation_type
+        self.extrapolation_energy_threshold = extrapolation_energy_threshold 
 
     @profile
     def setup_function(self):
@@ -113,6 +119,8 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
 
         # set this to events mode, as we need the per-event info to calculate these weights
         self.data.data_specs = 'events'
+
+        lgE_min = np.log10(self.extrapolation_energy_threshold)
 
         for container in self.data:
 
@@ -135,8 +143,6 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             #
             # Calculate variation of total cross section
             #
-
-            lgE_min = 2. if self.extrapolation_type == 'constant' else 1.68
 
             poly_coef = extrap_dict[nu][current]['poly_coef']
             lin_coef = extrap_dict[nu][current]['linear']
@@ -166,7 +172,6 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             # Calculate variation of differential cross section
             #
 
-            lgE_min = 2.
             spline_valid_mask = lgE >= lgE_min
             extrapolation_mask = ~spline_valid_mask
 
