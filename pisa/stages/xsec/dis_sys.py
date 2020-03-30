@@ -140,6 +140,9 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
 
             w_tot = np.ones_like(lgE)
 
+            valid_mask = lgE >= lgE_min
+            extrapolation_mask = ~valid_mask
+
             #
             # Calculate variation of total cross section
             #
@@ -150,10 +153,7 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             if self.extrapolation_type == 'higher':
                 w_tot = np.polyval(poly_coef, lgE)
             else:
-                poly_valid_mask = lgE >= lgE_min
-                extrapolation_mask = ~poly_valid_mask
-
-                w_tot[poly_valid_mask] = np.polyval(poly_coef, lgE[poly_valid_mask])
+                w_tot[valid_mask] = np.polyval(poly_coef, lgE[valid_mask])
 
                 if self.extrapolation_type == 'constant':
                     w_tot[extrapolation_mask] = np.polyval(poly_coef, lgE_min)  # note Numpy broadcasts
@@ -172,9 +172,6 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             # Calculate variation of differential cross section
             #
 
-            spline_valid_mask = lgE >= lgE_min
-            extrapolation_mask = ~spline_valid_mask
-
             w_diff = np.ones_like(lgE)
 
             if current == 'CC' and container['nubar'] > 0:
@@ -186,7 +183,7 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             elif current == 'NC' and container['nubar'] < 0:
                 weight_func = wf_nubarnc
 
-            w_diff[spline_valid_mask] = weight_func.ev(lgE[spline_valid_mask], bjorken_y[spline_valid_mask])
+            w_diff[valid_mask] = weight_func.ev(lgE[valid_mask], bjorken_y[valid_mask])
             w_diff[extrapolation_mask] = weight_func.ev(w_diff[extrapolation_mask] * lgE_min, bjorken_y[extrapolation_mask])
 
             # make centered arround 0, and set to 0 for all non-DIS events
