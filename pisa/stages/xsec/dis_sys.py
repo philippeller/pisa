@@ -7,7 +7,7 @@ ToDo: tech note being written, link here as soon as available
 
 from __future__ import absolute_import, print_function, division
 
-__all__ = ["dis_sys", "SIGNATURE", "apply_dis_sys"]
+__all__ = ["dis_sys", "apply_dis_sys"]
 
 import numpy as np
 from numba import guvectorize
@@ -181,7 +181,7 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             elif current == 'NC' and container['nubar'] < 0:
                 weight_func = wf_nubarnc
 
-            w_diff[spline_valid_mask] = weight_func.ev(lgE[spline_valid_mask], bjorken_y[spline_valid_mask ])
+            w_diff[spline_valid_mask] = weight_func.ev(lgE[spline_valid_mask], bjorken_y[spline_valid_mask])
             w_diff[extrapolation_mask] = weight_func.ev(w_diff[extrapolation_mask] * lgE_min, bjorken_y[extrapolation_mask])
 
             # make centered arround 0, and set to 0 for all non-DIS events
@@ -190,7 +190,6 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
             container["dis_correction_diff"] = w_diff
             container['dis_correction_diff'].mark_changed('host')
          
-
     @profile
     def apply_function(self):
         dis_csms = self.params.dis_csms.m_as('dimensionless')
