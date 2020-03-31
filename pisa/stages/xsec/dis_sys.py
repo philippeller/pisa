@@ -184,7 +184,7 @@ class dis_sys(PiStage): # pylint: disable=invalid-name
                 weight_func = wf_nubarnc
 
             w_diff[valid_mask] = weight_func.ev(lgE[valid_mask], bjorken_y[valid_mask])
-            w_diff[extrapolation_mask] = weight_func.ev(w_diff[extrapolation_mask] * lgE_min, bjorken_y[extrapolation_mask])
+            w_diff[extrapolation_mask] = weight_func.ev(lgE_min, bjorken_y[extrapolation_mask])
 
             # make centered arround 0, and set to 0 for all non-DIS events
             w_diff = (w_diff - 1) * dis
