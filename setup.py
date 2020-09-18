@@ -34,22 +34,25 @@ import subprocess
 import tempfile
 
 from setuptools.command.build_ext import build_ext
-from setuptools import setup, find_packages
+from setuptools import setup, Extension, find_packages
 import versioneer
 
 
 __all__ = [
-    'setup_cc',
+    'SETUP_REQUIRES',
+    'INSTALL_REQUIRES',
+    'EXTRAS_REQUIRE',
     'OMP_TEST_PROGRAM',
+    'setup_cc',
     'check_openmp',
     'CustomBuild',
-     'CustomBuildExt',
+    'CustomBuildExt',
     'do_setup',
 ]
 
 __author__ = 'S. Boeser, J.L. Lanfranchi, P. Eller, M. Hieronymus'
 
-__license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
+__license__ = '''Copyright (c) 2014-2020, The IceCube Collaboration
 
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
@@ -72,10 +75,50 @@ __license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
 #   extensions, etc.)
 
 
-def setup_cc():
-    """Set env var CC=cc if it is undefined"""
-    if 'CC' not in os.environ or os.environ['CC'].strip() == '':
-        os.environ['CC'] = 'cc'
+SETUP_REQUIRES = [
+    'pip>=1.8',
+    'setuptools>18.5', # versioneer requires >18.5
+    'numpy>=1.17',
+]
+
+INSTALL_REQUIRES = [
+    'decorator',
+    'kde @ git+https://github.com/icecubeopensource/kde.git',
+    'h5py',
+    'iminuit',
+    'line_profiler',
+    'matplotlib>=3.0', # 1.5: inferno colormap; 2.0: 'C0' colorspec
+    'numba==0.45.1', # >=0.35: fastmath jit flag; >=0.38: issue #439; 0.44 segfaults; 0.46 removes SmartArray
+    'numpy>=1.17',
+    'pint>=0.8.1', # see https://github.com/hgrecco/pint/issues/512
+    'scipy>=0.17',
+    'simplejson>=3.2',
+    'tables',
+    'uncertainties',
+    'llvmlite<=0.30.0', # 0.31 gave an error "Type of #4 arg mismatch: i1 != i32" in pisa/stages/osc/layers.py", line 91
+    'py-cpuinfo',
+    'sympy',
+    'cython',
+]
+
+EXTRAS_REQUIRE = {
+    'develop': [
+        'pylint>=1.7',
+        'recommonmark',
+        'sphinx>=1.3',
+        'sphinx_rtd_theme',
+        'versioneer',
+    ],
+    # TODO: get mceq install to work... this is non-trivial since that
+    # project isn't exactly cleanly instllable via pip already, plus it
+    # has "sub-projects" that won't get picked up by a simple single
+    # URL (e.g. the data). Plus it's huge (~1GB).
+    #'mceq': [
+    #    'numba==0.38',
+    #    'progressbar',
+    #    'MCEq'
+    #]
+}
 
 
 # See http://openmp.org/wp/openmp-compilers/
@@ -87,6 +130,12 @@ int main() {
 #pragma omp parallel
     printf("Hello from thread %d, nthreads %d\n", omp_get_thread_num(), omp_get_num_threads());
 }"""
+
+
+def setup_cc():
+    """Set env var CC=cc if it is undefined"""
+    if 'CC' not in os.environ or os.environ['CC'].strip() == '':
+        os.environ['CC'] = 'cc'
 
 
 def check_openmp():
@@ -142,7 +191,7 @@ class CustomBuildExt(build_ext):
     def finalize_options(self):
         build_ext.finalize_options(self)
         __builtins__.__NUMPY_SETUP__ = False
-        import numpy
+        import numpy  # pylint: disable=import-outside-toplevel
         self.include_dirs.append(numpy.get_include())
 
 
@@ -159,8 +208,10 @@ def do_setup():
     #    )
 
     # Collect (build-able) external modules and package_data
-    ext_modules = []
-
+    ext_modules = [Extension('pisa.utils.llh_defs.poisson_gamma_mixtures', 
+                                sources = ['pisa/utils/llh_defs/poisson_gamma_mixtures.pyx',
+                                           'pisa/utils/llh_defs/poisson_gamma.c'])
+                  ]
     # Include these things in source (and binary?) distributions
     package_data = {}
 
@@ -178,6 +229,7 @@ def do_setup():
         'resources/flux/*.d',
         'resources/osc/*.hdf5',
         'resources/osc/*.dat',
+        'resources/osc/numba_osc_tests_data/*.pkl',
         'resources/pid/*.json*',
         'resources/priors/*.json*',
         'resources/priors/*.md',
@@ -214,44 +266,10 @@ def do_setup():
         author_email='jll1062+pisa@phys.psu.edu',
         url='http://github.com/icecubeopensource/pisa',
         cmdclass=cmdclasses,
-        python_requires='>3.6',
-        setup_requires=[
-            'pip>=1.8',
-            'setuptools>18.5', # versioneer requires >18.5
-            'numpy>=1.17'
-        ],
-        install_requires=[
-            'decorator',
-            'kde @ git+https://github.com/icecubeopensource/kde.git',
-            'h5py',
-            'iminuit',
-            'line_profiler',
-            'matplotlib>=3.0', # 1.5: inferno colormap; 2.0: 'C0' colorspec
-            'numba==0.43.1', # >=0.35: fastmath jit flag; >=0.38: issue #439, <0.44 because SmartArray deprication
-            'pint>=0.8', # earlier versions buggy
-            'scipy>=0.17',
-            'simplejson>=3.2',
-            'tables',
-            'uncertainties',
-        ],
-        extras_require={
-            'develop': [
-                'pylint>=1.7',
-                'recommonmark',
-                'sphinx>=1.3',
-                'sphinx_rtd_theme',
-                'versioneer',
-            ],
-            # TODO: get mceq install to work... this is non-trivial since that
-            # project isn't exactly cleanly instllable via pip already, plus it
-            # has "sub-projects" that won't get picked up by a simple single
-            # URL (e.g. the data). Plus it's huge (~1GB).
-            #'mceq': [
-            #    'numba==0.38',
-            #    'progressbar',
-            #    'MCEq'
-            #]
-        },
+        python_requires='>=3.6, <3.8', # f-strings, kwarg/dict ordering require Py>=3.6; numba doesn't support Python 3.8 until numba 0.47 but we need numba==0.45.1
+        setup_requires=SETUP_REQUIRES,
+        install_requires=INSTALL_REQUIRES,
+        extras_require=EXTRAS_REQUIRE,
         dependency_links=[
             'git+https://github.com/icecubeopensource/kde.git#egg=kde',
             #'git+https://github.com/afedynitch/MCEq.git#egg=MCEq',
@@ -287,7 +305,8 @@ def do_setup():
 
                 # Scripts in pisa_tests dir
                 'pisa-test_changes_with_combined_pidreco = pisa_tests.test_changes_with_combined_pidreco:main',
-                'pisa-test_example_pipelines = pisa_tests.test_example_pipelines:main'
+                'pisa-test_example_pipelines = pisa_tests.test_example_pipelines:main',
+                'pisa-run_unit_tests = pisa_tests.run_unit_tests:run_unit_tests',
             ]
         }
     )

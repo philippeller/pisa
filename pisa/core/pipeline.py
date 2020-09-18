@@ -24,6 +24,7 @@ from pisa import ureg
 from pisa.core.events import Data
 from pisa.core.map import Map, MapSet
 from pisa.core.param import ParamSet
+from pisa.core.base_stage import BaseStage
 from pisa.core.stage import Stage
 from pisa.core.pi_stage import PiStage
 from pisa.core.transform import TransformSet
@@ -174,30 +175,37 @@ class Pipeline(object):
                 )
 
                 # Import service's module
-                logging.trace("Importing: pisa.stages.%s.%s", stage_name, service_name)
-                module = import_module("pisa.stages.%s.%s" % (stage_name, service_name))
+                module_path = f"pisa.stages.{stage_name}.{service_name}"
+                logging.trace("Importing service module: %s", module_path)
+                module = import_module(module_path)
 
                 # Get service class from module
-                cls = getattr(module, service_name)
+                service_cls = getattr(module, service_name)
 
                 # Instantiate service
                 logging.trace(
-                    "initializing stage %s.%s with settings %s"
+                    "initializing stage.service %s.%s with settings %s"
                     % (stage_name, service_name, settings)
                 )
-                service = cls(**settings)
                 try:
-                    service = cls(**settings)
-                except Exception as e:
-                    raise IOError(
-                        "Failed to instantiate stage %s.%s with settings %s, error"
-                        " was: %s" % (service_name, stage_name, settings.keys(), e)
+                    service = service_cls(**settings)
+                except Exception:
+                    logging.error(
+                        "Failed to instantiate stage.service %s.%s with settings %s",
+                        stage_name,
+                        service_name,
+                        settings.keys(),
                     )
+                    raise
 
                 cake_stage = isinstance(service, Stage)
                 pi_stage = isinstance(service, PiStage)
 
                 if not (cake_stage or pi_stage):
+                    logging.debug("is BaseStage? %s", isinstance(service, BaseStage))
+                    logging.debug("is Stage (cake)? %s", isinstance(service, Stage))
+                    logging.debug("is PiStage? %s", isinstance(service, PiStage))
+
                     raise TypeError(
                         'Trying to create service "%s" for stage #%d (%s),'
                         " but object %s instantiated from class %s is not a"
@@ -207,7 +215,7 @@ class Pipeline(object):
                             stage_num,
                             stage_name,
                             service,
-                            cls,
+                            service_cls,
                             type(service),
                         )
                     )
@@ -246,9 +254,14 @@ class Pipeline(object):
                 )
                 raise
 
+        param_selections = set()
+        for service in stages:
+            param_selections.update(service.param_selections)
+        param_selections = sorted(param_selections)
+
         previous_stage = None
         for stage in stages:
-            stage.select_params(self.param_selections, error_on_missing=False)
+            stage.select_params(param_selections, error_on_missing=False)
             if previous_stage is not None:
                 prev_has_binning = (
                     hasattr(previous_stage, "output_binning")
@@ -294,7 +307,7 @@ class Pipeline(object):
 
     # TODO: handle other container(s)
     @profile
-    def get_outputs(self, inputs=None, idx=None, return_intermediate=False):
+    def get_outputs(self, inputs=None, idx=None, return_intermediate=False, output_mode=None, force_standard_output=True):
         """Run the pipeline to compute its outputs.
 
         Parameters
@@ -311,6 +324,15 @@ class Pipeline(object):
 
         return_intermediate : bool
             Return list containing outputs from each stage in the pipeline.
+
+        output_mode: string
+            force an output mode to the stage
+
+        force_standard_output: bool
+            if requesting a binned output, object returned will be a list of MapSets
+            if set to False, object returned will be a list of Dict. each Dict item is 
+            a MapSet
+
 
         Returns
         -------
@@ -345,7 +367,7 @@ class Pipeline(object):
                 outputs = stage.run(inputs=inputs) # pylint: disable=redefined-outer-name
                 if return_intermediate:
                     if outputs is None:  # e.g. for PISA pi
-                        outputs = stage.get_outputs()
+                        outputs = stage.get_outputs(output_mode=output_mode, force_standard_output=force_standard_output)
                     intermediate.append(outputs)
                 logging.trace(">>> END  : {}.run(...)".format(name))
             except:
@@ -359,7 +381,7 @@ class Pipeline(object):
             inputs = outputs
 
         if outputs is None:  # e.g. for PISA pi
-            outputs = stage.get_outputs()
+            outputs = stage.get_outputs(output_mode=output_mode, force_standard_output=force_standard_output)
 
         if return_intermediate:
             return intermediate
@@ -468,78 +490,80 @@ def test_Pipeline():
     """Unit tests for Pipeline class"""
     # pylint: disable=line-too-long
 
+    # TODO: make a test config file with hierarchy AND material selector,
+    # uncomment / add in tests commented / removed below
+
     #
     # Test: select_params and param_selections
     #
 
     hierarchies = ["nh", "ih"]
-    materials = ["iron", "pyrolite"]
+    #materials = ["iron", "pyrolite"]
+    materials = []
 
     t23 = dict(ih=49.5 * ureg.deg, nh=42.3 * ureg.deg)
-    YeO = dict(iron=0.4656, pyrolite=0.4957)
+    #YeO = dict(iron=0.4656, pyrolite=0.4957)
 
     # Instantiate with two pipelines: first has both nh/ih and iron/pyrolite
     # param selectors, while the second only has nh/ih param selectors.
-    pipeline = Pipeline(
-        "tests/settings/test_Pipeline.cfg"
-    )  # pylint: disable=redefined-outer-name
+    pipeline = Pipeline("settings/pipeline/example.cfg")  # pylint: disable=redefined-outer-name
 
-    current_mat = "iron"
+    #current_mat = "iron"
     current_hier = "nh"
 
     for new_hier, new_mat in product(hierarchies, materials):
-        _ = YeO[new_mat]
+        #_ = YeO[new_mat]
 
-        assert pipeline.param_selections == sorted([current_hier, current_mat]), str(
-            pipeline.params.param_selections
+        assert pipeline.param_selections == sorted([current_hier]), str(
+            pipeline.param_selections
         )
         assert pipeline.params.theta23.value == t23[current_hier], str(
             pipeline.params.theta23
         )
-        assert pipeline.params.YeO.value == YeO[current_mat], str(pipeline.params.YeO)
+        #assert pipeline.params.YeO.value == YeO[current_mat], str(pipeline.params.YeO)
 
         # Select just the hierarchy
         pipeline.select_params(new_hier)
-        assert pipeline.param_selections == sorted([new_hier, current_mat]), str(
+        assert pipeline.param_selections == sorted([new_hier]), str(
             pipeline.param_selections
         )
         assert pipeline.params.theta23.value == t23[new_hier], str(
             pipeline.params.theta23
         )
-        assert pipeline.params.YeO.value == YeO[current_mat], str(pipeline.params.YeO)
+        #assert pipeline.params.YeO.value == YeO[current_mat], str(pipeline.params.YeO)
 
-        # Select just the material
-        pipeline.select_params(new_mat)
-        assert pipeline.param_selections == sorted([new_hier, new_mat]), str(
-            pipeline.param_selections
-        )
+        ## Select just the material
+        #pipeline.select_params(new_mat)
+        #assert pipeline.param_selections == sorted([new_hier, new_mat]), str(
+        #    pipeline.param_selections
+        #)
         assert pipeline.params.theta23.value == t23[new_hier], str(
             pipeline.params.theta23
         )
-        assert pipeline.params.YeO.value == YeO[new_mat], str(pipeline.params.YeO)
+        #assert pipeline.params.YeO.value == YeO[new_mat], str(pipeline.params.YeO)
 
         # Reset both to "current"
-        pipeline.select_params([current_mat, current_hier])
-        assert pipeline.param_selections == sorted([current_hier, current_mat]), str(
+        pipeline.select_params([current_hier])
+        assert pipeline.param_selections == sorted([current_hier]), str(
             pipeline.param_selections
         )
         assert pipeline.params.theta23.value == t23[current_hier], str(
             pipeline.params.theta23
         )
-        assert pipeline.params.YeO.value == YeO[current_mat], str(pipeline.params.YeO)
+        #assert pipeline.params.YeO.value == YeO[current_mat], str(pipeline.params.YeO)
 
-        # Select both hierarchy and material
-        pipeline.select_params([new_mat, new_hier])
-        assert pipeline.param_selections == sorted([new_hier, new_mat]), str(
-            pipeline.param_selections
-        )
-        assert pipeline.params.theta23.value == t23[new_hier], str(
-            pipeline.params.theta23
-        )
-        assert pipeline.params.YeO.value == YeO[new_mat], str(pipeline.params.YeO)
+        ## Select both hierarchy and material
+        #pipeline.select_params([new_hier])
+        #assert pipeline.param_selections == sorted([new_hier, new_mat]), str(
+        #    pipeline.param_selections
+        #)
+        #assert pipeline.params.theta23.value == t23[new_hier], str(
+        #    pipeline.params.theta23
+        #)
+        #assert pipeline.params.YeO.value == YeO[new_mat], str(pipeline.params.YeO)
 
-        current_hier = new_hier
-        current_mat = new_mat
+        #current_hier = new_hier
+        #current_mat = new_mat
 
 
 def parse_args():

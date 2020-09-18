@@ -11,6 +11,7 @@ from collections.abc import Iterable, Sequence
 from collections import OrderedDict
 import decimal
 from numbers import Integral, Number
+import os
 import re
 import time
 
@@ -19,28 +20,56 @@ import uncertainties
 
 from pisa import FTYPE, ureg
 from pisa.utils.flavInt import NuFlavIntGroup
-from pisa.utils.log import logging, set_verbosity
+from pisa.utils.log import Levels, logging, set_verbosity
 
 
 __all__ = [
-    'WHITESPACE_RE', 'NUMBER_RESTR', 'NUMBER_RE', 'HRGROUP_RESTR',
-    'HRGROUP_RE', 'IGNORE_CHARS_RE', 'TEX_BACKSLASH_CHARS',
-    'TEX_SPECIAL_CHARS_MAPPING', 'SI_PREFIX_TO_ORDER_OF_MAG',
-    'ORDER_OF_MAG_TO_SI_PREFIX', 'BIN_PREFIX_TO_POWER_OF_1024',
-    'POWER_OF_1024_TO_BIN_PREFIX', 'split', 'hr_range_formatter',
-    'test_hr_range_formatter', 'list2hrlist', 'test_list2hrlist',
-    'hrlist2list', 'hrlol2lol', 'hrbool2bool', 'engfmt', 'text2tex',
-    'tex_join', 'tex_dollars', 'default_map_tex', 'is_tex', 'int2hex',
-    'hash2hex', 'strip_outer_dollars', 'strip_outer_parens',
-    'make_valid_python_name', 'sep_three_tens', 'format_num',
-    'test_format_num', 'timediff', 'test_timediff', 'timestamp',
-    'test_timestamp', 'arg_str_seq_none'
+    'WHITESPACE_RE',
+    'NUMBER_RESTR',
+    'NUMBER_RE',
+    'HRGROUP_RESTR',
+    'HRGROUP_RE',
+    'IGNORE_CHARS_RE',
+    'TEX_BACKSLASH_CHARS',
+    'TEX_SPECIAL_CHARS_MAPPING',
+    'SI_PREFIX_TO_ORDER_OF_MAG',
+    'ORDER_OF_MAG_TO_SI_PREFIX',
+    'BIN_PREFIX_TO_POWER_OF_1024',
+    'POWER_OF_1024_TO_BIN_PREFIX',
+    'split',
+    'arg_str_seq_none',
+    'arg_to_tuple',
+    'hr_range_formatter',
+    'test_hr_range_formatter',
+    'list2hrlist',
+    'test_list2hrlist',
+    'hrlist2list',
+    'hrlol2lol',
+    'hrbool2bool',
+    'engfmt',
+    'text2tex',
+    'tex_join',
+    'tex_dollars',
+    'default_map_tex',
+    'is_tex',
+    'int2hex',
+    'hash2hex',
+    'strip_outer_dollars',
+    'strip_outer_parens',
+    'make_valid_python_name',
+    'sep_three_tens',
+    'format_num',
+    'test_format_num',
+    'timediff',
+    'test_timediff',
+    'timestamp',
+    'test_timestamp',
 ]
 
 
 __author__ = 'J.L. Lanfranchi'
 
-__license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
+__license__ = '''Copyright (c) 2014-2020, The IceCube Collaboration
 
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
@@ -240,6 +269,30 @@ def arg_str_seq_none(inputs, name):
     else:
         raise TypeError('Input %s: Unhandled type %s' % (name, type(inputs)))
     return inputs
+
+def arg_to_tuple(arg):
+    """Convert `arg` to a tuple: None becomes an empty tuple, an isolated
+    string becomes a tuple containing that string, and any iterable or sequence
+    is simply converted into a tuple.
+
+    Parameters
+    ----------
+    arg : str, sequence of str, iterable of str, or None
+
+    Returns
+    -------
+    arg_tup : tuple of str
+
+    """
+    if arg is None:
+        arg = tuple()
+    elif isinstance(arg, str):
+        arg = (arg,)
+    elif isinstance(arg, (Iterable, Sequence)):
+        arg = tuple(arg)
+    else:
+        raise TypeError('Unhandled type {}, arg={}'.format(type(arg), arg))
+    return arg
 
 # TODO: allow for scientific notation input to hr*2list, etc.
 
@@ -1507,6 +1560,15 @@ def timestamp(d=True, t=True, tz=True, utc=False, winsafe=False):
     """Simple utility to print out a time, date, or time+date stamp for the
     time at which the function is called.
 
+    Calling via defaults (explcitly provided here for reference) .. ::
+
+        timestamp(d=True, t=True, tz=True, utc=False, winsafe=False)
+
+    should be equivalent to the shell command .. ::
+
+        date +'%Y-%m-%dT%H:%M:%S%z'
+
+
     Parameters
     ----------:
     d : bool
@@ -1553,12 +1615,23 @@ def timestamp(d=True, t=True, tz=True, utc=False, winsafe=False):
 
 def test_timestamp():
     """Unit tests for timestamp function"""
-    print(timestamp())
+    date_cmd = "date +'%Y-%m-%dT%H:%M:%S%z'"
+
+    # In case we call these on either side of a second, repeat a few times if not equal
+    for _ in range(10):
+        ref = os.popen(date_cmd).read().strip()
+        test = timestamp(winsafe=False)
+        if test == ref:
+            break
+        time.sleep(0.05)
+
+    assert test == ref, f'{date_cmd} = "{ref}" but timestamp = "{test}"'
+
     logging.info('<< PASS : test_timestamp >>')
 
 
 if __name__ == '__main__':
-    set_verbosity(1)
+    set_verbosity(Levels.INFO)
     test_hr_range_formatter()
     test_list2hrlist()
     test_format_num()

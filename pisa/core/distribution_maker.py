@@ -10,7 +10,6 @@ from __future__ import absolute_import
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from collections import OrderedDict
 from collections.abc import Mapping
-from functools import reduce
 import inspect
 from itertools import product
 import os
@@ -192,23 +191,38 @@ class DistributionMaker(object):
             If False, return a list where each element is the full MapSet
             returned by each pipeline in the DistributionMaker.
 
+
         **kwargs
-            Passed on to each pipeline's `get_outputs1` method.
+            Passed on to each pipeline's `get_outputs` method.
 
         Returns
         -------
         MapSet if `return_sum=True` or list of MapSets if `return_sum=False`
 
         """
+
         outputs = [pipeline.get_outputs(**kwargs) for pipeline in self] # pylint: disable=redefined-outer-name
+
         if return_sum:
-            if len(outputs) > 1:
-                outputs = reduce(lambda x, y: sum(x) + sum(y), outputs)
-            else:
-                outputs = sum(sum(outputs))
-            outputs.name = sum_map_name
-            outputs.tex = sum_map_tex_name
-            outputs = MapSet(outputs)
+            
+            # Case where the output of a pipeline is a mapSet
+            if isinstance(outputs[0], MapSet):
+                outputs = sum([sum(x) for x in outputs]) # This produces a Map
+                outputs.name = sum_map_name
+                outputs.tex = sum_map_tex_name
+                outputs = MapSet(outputs) # final output must be a MapSet
+
+            # Case where the output of a pipeline is a dict of different MapSets
+            elif isinstance(outputs[0], OrderedDict):
+                output_dict = OrderedDict()
+                for key in outputs[0].keys():
+                    output_dict[key] = sum([sum(A[key]) for A in outputs]) # This produces a Map objects
+                    output_dict[key].name = sum_map_name
+                    output_dict[key].tex = sum_map_tex_name
+                    output_dict[key] = MapSet(output_dict[key])
+
+                outputs = output_dict
+
         return outputs
 
     def update_params(self, params):
@@ -275,6 +289,41 @@ class DistributionMaker(object):
     def hash(self):
         return hash_obj([self.source_code_hash] + [p.hash for p in self])
 
+    @property
+    def num_events_per_bin(self):
+        '''
+        returns an array of bin indices where none of the 
+        pipelines have MC events
+
+        assumes that all pipelines have the same binning output specs
+
+        number of events is taken out of the last stage of the pipeline
+        '''
+        num_bins = self.pipelines[0].stages[-1].output_specs.tot_num_bins
+        num_events_per_bin = np.zeros(num_bins)
+
+        for p in self.pipelines:
+            assert p.stages[-1].output_specs.tot_num_bins==num_bins, 'ERROR: different pipelines have different binning'
+
+            for c in p.stages[-1].data:
+                for index in range(num_bins):
+                    index_mask = c.array_data['bin_{}_mask'.format(index)].get('host')
+                    current_weights = c.array_data['weights'].get('host')[index_mask]
+                    n_weights = current_weights.shape[0]
+                    num_events_per_bin[index] += n_weights
+
+        return num_events_per_bin
+    
+
+    @property
+    def empty_bin_indices(self):
+        '''Find indices where there are no events present
+        '''
+        empty_counts = self.num_events_per_bin == 0
+        indices = np.where(empty_counts)[0]
+        return indices
+    
+
     def set_free_params(self, values):
         """Set free parameters' values.
 
@@ -340,8 +389,12 @@ def test_DistributionMaker():
     # Test: select_params and param_selections
     #
 
+    # TODO: make test config file with materials param selector, then uncomment
+    # removed tests below
+
     hierarchies = ['nh', 'ih']
-    materials = ['iron', 'pyrolite']
+    #materials = ['iron', 'pyrolite']
+    materials = []
 
     t23 = dict(
         ih=49.5 * ureg.deg,
@@ -354,57 +407,57 @@ def test_DistributionMaker():
 
     # Instantiate with two pipelines: first has both nh/ih and iron/pyrolite
     # param selectors, while the second only has nh/ih param selectors.
-    dm = DistributionMaker(['tests/settings/test_Pipeline.cfg',
-                            'tests/settings/test_Pipeline2.cfg'])
+    dm = DistributionMaker(
+        ['settings/pipeline/example.cfg', 'settings/pipeline/example.cfg']
+    )
 
-    current_mat = 'iron'
+    #current_mat = 'iron'
     current_hier = 'nh'
 
     for new_hier, new_mat in product(hierarchies, materials):
-        assert dm.param_selections == sorted([current_hier, current_mat]), \
-                str(dm.params.param_selections)
-        assert dm.params.theta23.value == t23[current_hier], \
-                str(dm.params.theta23)
-        assert dm.params.YeO.value == YeO[current_mat], str(dm.params.YeO)
+        #assert dm.param_selections == sorted([current_hier, current_mat]), \
+        #        str(dm.param_selections)
+        assert dm.param_selections == [current_hier], str(dm.param_selections)
+        assert dm.params.theta23.value == t23[current_hier], str(dm.params.theta23)
+        #assert dm.params.YeO.value == YeO[current_mat], str(dm.params.YeO)
 
         # Select just the hierarchy
         dm.select_params(new_hier)
-        assert dm.param_selections == sorted([new_hier, current_mat]), \
-                str(dm.param_selections)
-        assert dm.params.theta23.value == t23[new_hier], \
-                str(dm.params.theta23)
-        assert dm.params.YeO.value == YeO[current_mat], \
-                str(dm.params.YeO)
+        #assert dm.param_selections == sorted([new_hier, current_mat]), \
+        #        str(dm.param_selections)
+        assert dm.param_selections == [new_hier], str(dm.param_selections)
+        assert dm.params.theta23.value == t23[new_hier], str(dm.params.theta23)
+        #assert dm.params.YeO.value == YeO[current_mat], str(dm.params.YeO)
 
-        # Select just the material
-        dm.select_params(new_mat)
-        assert dm.param_selections == sorted([new_hier, new_mat]), \
-                str(dm.param_selections)
-        assert dm.params.theta23.value == t23[new_hier], \
-                str(dm.params.theta23)
-        assert dm.params.YeO.value == YeO[new_mat], \
-                str(dm.params.YeO)
+        ## Select just the material
+        #dm.select_params(new_mat)
+        #assert dm.param_selections == sorted([new_hier, new_mat]), \
+        #        str(dm.param_selections)
+        #assert dm.params.theta23.value == t23[new_hier], \
+        #        str(dm.params.theta23)
+        #assert dm.params.YeO.value == YeO[new_mat], \
+        #        str(dm.params.YeO)
 
         # Reset both to "current"
-        dm.select_params([current_mat, current_hier])
-        assert dm.param_selections == sorted([current_hier, current_mat]), \
-                str(dm.param_selections)
-        assert dm.params.theta23.value == t23[current_hier], \
-                str(dm.params.theta23)
-        assert dm.params.YeO.value == YeO[current_mat], \
-                str(dm.params.YeO)
+        #dm.select_params([current_mat, current_hier])
+        dm.select_params(current_hier)
+        #assert dm.param_selections == sorted([current_hier, current_mat]), \
+        #        str(dm.param_selections)
+        assert dm.param_selections == [current_hier], str(dm.param_selections)
+        assert dm.params.theta23.value == t23[current_hier], str(dm.params.theta23)
+        #assert dm.params.YeO.value == YeO[current_mat], str(dm.params.YeO)
 
-        # Select both hierarchy and material
-        dm.select_params([new_mat, new_hier])
-        assert dm.param_selections == sorted([new_hier, new_mat]), \
-                str(dm.param_selections)
-        assert dm.params.theta23.value == t23[new_hier], \
-                str(dm.params.theta23)
-        assert dm.params.YeO.value == YeO[new_mat], \
-                str(dm.params.YeO)
+        ## Select both hierarchy and material
+        #dm.select_params([new_mat, new_hier])
+        #assert dm.param_selections == sorted([new_hier, new_mat]), \
+        #        str(dm.param_selections)
+        #assert dm.params.theta23.value == t23[new_hier], \
+        #        str(dm.params.theta23)
+        #assert dm.params.YeO.value == YeO[new_mat], \
+        #        str(dm.params.YeO)
 
-        current_hier = new_hier
-        current_mat = new_mat
+        #current_hier = new_hier
+        #current_mat = new_mat
 
 
 def parse_args():
