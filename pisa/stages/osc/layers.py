@@ -101,8 +101,8 @@ def extCalcLayers(
         traverse_dist = np.zeros(max_layers, dtype=FTYPE)
         traverse_electron_frac = np.zeros(max_layers, dtype=FTYPE)
 
-        r_prop = self.r_detector + self.detector_depth + self.prop_height
-        path_len = -self.r_detector*coszen + np.sqrt(self.r_detector**2.*coszen**2 - (self.r_detector**2. - r_prop*r_prop))
+        r_prop = r_detector + detector_depth + prop_height
+        path_len = -r_detector*coszen + np.sqrt(r_detector**2.*coszen**2 - (r_detector**2. - r_prop*r_prop))
 
         # Above horizon
         if coszen >= 0:
