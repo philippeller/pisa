@@ -101,14 +101,11 @@ def extCalcLayers(
         traverse_dist = np.zeros(max_layers, dtype=FTYPE)
         traverse_electron_frac = np.zeros(max_layers, dtype=FTYPE)
 
+        r_prop = self.r_detector + self.detector_depth + self.prop_height
+        path_len = -self.r_detector*coszen + np.sqrt(self.r_detector**2.*coszen**2 - (self.r_detector**2. - r_prop*r_prop))
+
         # Above horizon
         if coszen >= 0:
-            kappa = (detector_depth + prop_height)/r_detector
-            path_len = (
-                r_detector * np.sqrt(coszen**2 - 1 + (1 + kappa)**2)
-                - r_detector * coszen
-            )
-
             # Path through the air:
             kappa = detector_depth / r_detector
             lam = (
@@ -134,12 +131,6 @@ def extCalcLayers(
 
         # Below horizon
         else:
-            path_len = (
-                np.sqrt((r_detector + prop_height + detector_depth)**2
-                        - r_detector**2 * (1 - coszen**2))
-                - r_detector * coszen
-            )
-
             # Path through air (that's down from production height in the
             # atmosphere?)
             traverse_rhos[0] = 0
@@ -260,6 +251,11 @@ class Layers(object):
         if prem_file is not None :
             self.using_earth_model = True
             prem = from_file(prem_file, as_array=True)
+
+            # The following radii and densities are extracted in reverse order
+            # w.r.t the file. The first elements of the arrays below corresponds
+            # the Earth's surface, and the floowing numbers go deeper toward the 
+            # planet's core
             self.rhos = prem[...,1][::-1].astype(FTYPE)
             self.radii = prem[...,0][::-1].astype(FTYPE)
             r_earth = prem[-1][0]
@@ -269,6 +265,14 @@ class Layers(object):
         else :
             self.using_earth_model = False
             r_earth = 6371.0 #If no Earth model provided, use a standard Earth radius value
+
+
+        #
+        # Make some checks about the input production height and detector depth
+        #
+        assert detector_depth>0, 'ERROR: detector depth must be a positive value'
+        assert detector_depth<=r_earth, 'ERROR: detector depth is deeper than one Earth radius!'
+        assert prop_height>=0, 'ERROR: neutrino production height must be positive'
 
         # Set some other
         self.r_detector = r_earth - detector_depth
@@ -383,17 +387,9 @@ class Layers(object):
 
         for this_cz in (cz if hasattr(cz,"__len__") else [cz] ) :
 
-            if this_cz < 0:
-                this_pathlength = np.sqrt(
-                    (self.r_detector + self.prop_height + self.detector_depth) * \
-                    (self.r_detector + self.prop_height + self.detector_depth) - \
-                    (self.r_detector*self.r_detector)*(1 - this_cz*this_cz)
-                ) - self.r_detector*this_cz
-            else:
-                kappa = (self.detector_depth + self.prop_height)/self.r_detector
-                this_pathlength = self.r_detector * np.sqrt(
-                    this_cz*this_cz - 1 + (1 + kappa)*(1 + kappa)
-                ) - self.r_detector*this_cz
+            r_prop = self.r_detector + self.detector_depth + self.prop_height
+
+            this_pathlength = -self.r_detector*this_cz + np.sqrt(self.r_detector**2.*this_cz**2 - (self.r_detector**2. - r_prop*r_prop))
 
             pathlength.append(this_pathlength)
 
