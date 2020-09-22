@@ -46,6 +46,7 @@ else:
     ftype = numba.typeof(FTYPE(1))
 
 
+
 @jit(nopython=True, nogil=True, cache=True)
 def extCalcLayers(cz,
         r_detector,
@@ -86,8 +87,8 @@ def extCalcLayers(cz,
 
         # 
         # Determine if there will be a crossing of layer
-        #
-        I = find_first_inner_layer(radii,r_detector)
+        # I is the index of the first inner layer
+        I = np.where(radii<r_detector)[0][0]
         first_inner_layer = radii[I]
 
         #
@@ -156,17 +157,7 @@ def extCalcLayers(cz,
             #
             segments_lengths = np.flip(segments_lengths)
             density = np.flip(density)
-            #print('coszen_limit: ',coszen_limit)
-            #print('radii: ',radii)
-            #print('compute small root in: ', calculate_small_root)
-            #print('compute large root in: ', calculate_large_root)
 
-            #print('small root: ', small_roots)
-            #print('large root: ', large_roots)
-            #print('\n\n\n\n')
-            #print('full distances: ', full_distances)
-            #print('segment length: ', segments_lengths)
-            #print(' full distance difference: ', np.sum(segments_lengths)-path_len)
         n_layers = np.sum(segments_lengths>0.,dtype=np.float64)
 
     return n_layers, density.ravel(), segments_lengths.ravel()
