@@ -15,12 +15,11 @@ from pisa import FTYPE
 from pisa.utils.fileio import from_file
 from pisa.utils.log import logging, set_verbosity
 
-
 __all__ = ['extCalcLayers', 'Layers']
 
-__author__ = 'P. Eller'
+__author__ = 'P. Eller','E. Bourbeau'
 
-__license__ = '''Copyright (c) 2014-2017, The IceCube Collaboration
+__license__ = '''Copyright (c) 2014-2020, The IceCube Collaboration
 
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
@@ -47,18 +46,13 @@ else:
     ftype = numba.typeof(FTYPE(1))
 
 
+
 @jit(nopython=True, nogil=True, cache=True)
-def extCalcLayers(
-        cz,
+def extCalcLayers(cz,
         r_detector,
         prop_height,
         detector_depth,
-        max_layers,
-        min_detector_depth,
         rhos,
-        YeFrac,
-        YeOuterRadius,
-        default_elec_frac,
         coszen_limit,
         radii):
     """Layer density/distance calculator for each coszen specified.
@@ -67,17 +61,13 @@ def extCalcLayers(
 
     Parameters
     ----------
-    cz
-    r_detector
-    prop_height
-    detector_depth
-    max_layers
-    min_detector_depth
-    rhos
-    YeFrac
-    YeOuterRadius
-    default_elec_frac
-    coszen_limit
+    cz             : coszen value
+    r_detector     : radial position of the detector (float)
+    prop_height    : height at which neutrinos are assumed to be produced (float)
+    detector_depth : depth at which the detector is buried (float)
+    rhos           : densities (already weighted by electron fractions) (ndarray)
+    radii          : radii defining the Earth's layer (ndarray)
+    coszen         : coszen values corresponding to the radii above (ndarray)
 
     Returns
     -------
@@ -86,131 +76,91 @@ def extCalcLayers(
     distance : array of distances per layer, flattened from (cz, max_layers)
 
     """
-    # Something to store the final results in
-    shape = (np.int64(len(cz)), np.int64(max_layers))
-    n_layers = np.zeros(shape[0], dtype=np.int32)
-    distance = np.zeros(shape=shape, dtype=FTYPE)
-    density = np.zeros(shape=shape, dtype=FTYPE)
 
     # Loop over all CZ values
     for k, coszen in enumerate(cz):
-        tot_earth_len = -2 * coszen * r_detector
 
-        # To store results
-        traverse_rhos = np.zeros(max_layers, dtype=FTYPE)
-        traverse_dist = np.zeros(max_layers, dtype=FTYPE)
-        traverse_electron_frac = np.zeros(max_layers, dtype=FTYPE)
+        r_prop = r_detector+detector_depth+prop_height
+        # Compute the full path length
+        path_len = -r_detector*coszen + np.sqrt(r_detector**2.*coszen**2 - (r_detector**2. - r_prop**2.))
 
-        # Above horizon
-        if coszen >= 0:
-            kappa = (detector_depth + prop_height)/r_detector
-            path_len = (
-                r_detector * np.sqrt(coszen**2 - 1 + (1 + kappa)**2)
-                - r_detector * coszen
-            )
 
-            # Path through the air:
-            kappa = detector_depth / r_detector
-            lam = (
-                coszen + np.sqrt(coszen**2 - 1 + (1 + kappa) * (1 + kappa))
-            )
-            lam *= r_detector
-            path_thru_atm = (
-                prop_height * (prop_height + 2*detector_depth + 2*r_detector)
-                / (path_len + lam)
-            )
-            path_thru_outerlayer = path_len - path_thru_atm
-            traverse_rhos[0] = 0.0
-            traverse_dist[0] = path_thru_atm
-            traverse_electron_frac[0] = default_elec_frac
+        # 
+        # Determine if there will be a crossing of layer
+        # I is the index of the first inner layer
+        I = np.where(radii<r_detector)[0][0]
+        first_inner_layer = radii[I]
 
-            # In that case the neutrino passes through some earth (?)
-            layers = 1
-            if detector_depth > min_detector_depth:
-                traverse_rhos[1] = rhos[0]
-                traverse_dist[1] = path_thru_outerlayer
-                traverse_electron_frac[1] = YeFrac[-1]
-                layers += 1
+        #
+        # Deal with paths that do not have tangeants
+        #
+        if coszen>=coszen_limit[I]: 
+            cumulative_distances = -r_detector*coszen + np.sqrt(r_detector**2.*coszen**2. -r_detector**2. + radii[:I]**2.)
+            # a bit of flippy business is done here to order terms
+            # such that numpy diff can work
+            segments_lengths= np.flip(np.diff(np.concatenate([np.array([0.]), np.flip(cumulative_distances)])))
 
-        # Below horizon
+            segments_lengths = np.concatenate([segments_lengths, np.zeros(radii.shape[0]-I)])
+            rhos*=(segments_lengths>0.)
+            density = np.concatenate([rhos, np.zeros(radii.shape[0]-I)])
+
+            #print('diff with total path', np.sum(segment_distances)-path_len) # CHECKED
+
         else:
-            path_len = (
-                np.sqrt((r_detector + prop_height + detector_depth)**2
-                        - r_detector**2 * (1 - coszen**2))
-                - r_detector * coszen
-            )
+            #
+            # Figure out how many layers are crossed twice
+            # (meaning we calculate the negative root for these layers)
+            #
+            calculate_small_root = (coszen<coszen_limit)*(coszen_limit<=coszen_limit[I])
+            calculate_large_root = (coszen_limit>coszen)
 
-            # Path through air (that's down from production height in the
-            # atmosphere?)
-            traverse_rhos[0] = 0
-            traverse_dist[0] = (
-                prop_height * (prop_height + detector_depth + 2*r_detector)
-                / path_len
-            )
+            small_roots = -r_detector*coszen*calculate_small_root - np.sqrt(r_detector**2*coszen**2 - r_detector**2+ radii**2, where=calculate_small_root, out=np.zeros_like(radii))
+            large_roots = -r_detector*coszen*calculate_large_root + np.sqrt(r_detector**2*coszen**2 - r_detector**2+ radii**2, where=calculate_large_root, out=np.zeros_like(radii))
 
-            # TODO: Why default here?
-            traverse_electron_frac[0] = default_elec_frac
-            i_trav = 1
+            #
+            # concatenate large and small roots together
+            # from the detector outward, the first layers
+            # correspond to the small roots, in increasing
+            # layer number (layer 1, layer 2, layer 3...)
+            #
+            # after reaching the deepest layer's small root,
+            # the path crosses the large root values in decreasing
+            # order (ie, path crosses layer N's large root, then
+            # layer (N-1), then layer(N-2)...). This layer ends with
+            # the two large roots of the layers above the detector height
+            #
+            full_distances = np.concatenate([small_roots, np.flip(large_roots)])
 
-            # Path through the final layer above the detector (if necessary)
-            # NOTE: outer top layer is assumed to be the same as the next layer
-            # inward.
-            if detector_depth > min_detector_depth:
-                traverse_rhos[1] = rhos[0]
-                traverse_dist[1] = path_len - tot_earth_len - traverse_dist[0]
-                traverse_electron_frac[1] = YeFrac[-1]
-                i_trav += 1
-
-            # See how many layers we will pass
-            layers = 0
-            for val in coszen_limit:
-                if coszen < val:
-                    layers += 1
-
-            # The zeroth layer is the air!
-            # ... and the first layer is the top layer (if detector is not on
-            # surface)
-            for i in range(layers):
-                # this is the density
-                traverse_rhos[i+i_trav] = rhos[i]
-                # TODO: Why default? is this air with density 0 and electron
-                # fraction just doesn't matter?
-                traverse_electron_frac[i+i_trav] = default_elec_frac
-                for rad_i in range(len(YeOuterRadius)):
-                    # TODO: why 1.001 here?
-                    if radii[i] < (YeOuterRadius[rad_i] * 1.001):
-                        traverse_electron_frac[i+i_trav] = YeFrac[rad_i]
-                        break
-
-                # Now calculate the distance travele in layer
-                c2 = coszen**2
-                R2 = r_detector**2
-                s1 = radii[i]**2 - R2*(1 -c2)
-                s2 = radii[i+1]**2 - R2*(1 -c2)
-                cross_this = 2. * np.sqrt(s1)
-                if i < layers - 1:
-                    cross_next = 2. * np.sqrt(s2)
-                    traverse_dist[i+i_trav] = 0.5 * (cross_this - cross_next)
+            # The above vector gives the cumulative distance travelled
+            # after passing each layer, starting from the detector and 
+            # moving outward toward the atmosphere. To get the individual
+            # distance segments, we need to get the diff of all
+            # nonzero distances in this array. This requires a couple of
+            # less elegant manipulations
+            #
+            non_zero_indices = np.where(full_distances>0)[0]
+            segments_lengths = np.zeros_like(full_distances)
+            for ii,i in enumerate(non_zero_indices):
+                if ii==0:
+                    segments_lengths[i] = full_distances[i]
                 else:
-                    traverse_dist[i+i_trav] = cross_this
+                    previous_i = non_zero_indices[ii-1]
+                    segments_lengths[i] = full_distances[i]-full_distances[previous_i]
 
-                # Assumes azimuthal symmetry
-                if i > 0 and i < layers:
-                    index = 2 * layers - i + i_trav - 1
-                    traverse_rhos[index] = traverse_rhos[i+i_trav-1]
-                    traverse_dist[index] = traverse_dist[i+i_trav-1]
-                    traverse_electron_frac[index] = (
-                        traverse_electron_frac[i+i_trav-1]
-                    )
+            #
+            # arange the densities to match the segment array structure
+            #
+            density = np.concatenate([rhos,np.flip(rhos)])
+            density*=(segments_lengths>0.)
+            #
+            # To respect the order at which layers are crossed, all these array must be flipped
+            #
+            segments_lengths = np.flip(segments_lengths)
+            density = np.flip(density)
 
-            # That is now the total
-            layers = 2 * layers + i_trav - 1
+        n_layers = np.sum(segments_lengths>0.,dtype=np.float64)
 
-        n_layers[k] = np.int32(layers)
-        density[k] = traverse_rhos * traverse_electron_frac
-        distance[k] = traverse_dist
-
-    return n_layers, density.ravel(), distance.ravel()
+    return n_layers, density.ravel(), segments_lengths.ravel()
 
 
 class Layers(object):
@@ -260,32 +210,43 @@ class Layers(object):
         if prem_file is not None :
             self.using_earth_model = True
             prem = from_file(prem_file, as_array=True)
+
+            # The following radii and densities are extracted in reverse order
+            # w.r.t the file. The first elements of the arrays below corresponds
+            # the Earth's surface, and the floowing numbers go deeper toward the 
+            # planet's core
             self.rhos = prem[...,1][::-1].astype(FTYPE)
             self.radii = prem[...,0][::-1].astype(FTYPE)
             r_earth = prem[-1][0]
             self.default_elec_frac = 0.5
             n_prem = len(self.radii) - 1
             self.max_layers = 2 * n_prem + 1
+
+            # Add an external layer corresponding to the atmosphere / production boundary
+            self.radii = np.concatenate([np.array([r_earth+prop_height]), self.radii])
+            self.rhos  = np.concatenate([np.zeros(1, dtype=FTYPE), self.rhos])
+
         else :
             self.using_earth_model = False
             r_earth = 6371.0 #If no Earth model provided, use a standard Earth radius value
+
+
+        #
+        # Make some checks about the input production height and detector depth
+        #
+        assert detector_depth>0, 'ERROR: detector depth must be a positive value'
+        assert detector_depth<=r_earth, 'ERROR: detector depth is deeper than one Earth radius!'
+        assert prop_height>=0, 'ERROR: neutrino production height must be positive'
 
         # Set some other
         self.r_detector = r_earth - detector_depth
         self.prop_height = prop_height
         self.detector_depth = detector_depth
-        self.min_detector_depth = 1.0e-3 # <-- Why? // [km] so min is ~ 1 m
 
-        # Some additional handling of the Earth model
         if self.using_earth_model:
-
-            # Change outermost radius to a bit underground, where the detector
-            if self.detector_depth >= self.min_detector_depth:
-                self.radii[0] -= detector_depth
-                self.max_layers += 1
-
-            # Compute coszen limit
+            # Compute the coszen_limits
             self.computeMinLengthToLayers()
+            
 
 
     def setElecFrac(self, YeI, YeO, YeM):
@@ -304,22 +265,39 @@ class Layers(object):
 
         self.YeFrac = np.array([YeI, YeO, YeM], dtype=FTYPE)
 
-        # NOTE: these numbers are hard coded from PREM paper
-        self.YeOuterRadius = np.array([1221.5, 3480.0, self.r_detector],
-                                      dtype=FTYPE)
+        # re-weight the layer densities accordingly
+        self.weight_density_to_YeFrac()
 
     def computeMinLengthToLayers(self):
-        # Compute which layer is tangeted at which angle
+        '''
+        Deterine the coszen values for which a track will 
+        be tangeant to a given layer.
+
+        Given the detector radius and the layer radii:
+
+        - A layer will be tangeant if radii<r_detector
+
+        - Given r_detector and r_i, the limit angle 
+          will be:
+
+                sin(theta) = r_i / r_detector
+
+        that angle can then be expressed back into a cosine using
+        trigonometric identities
+
+        '''
         coszen_limit = []
         # First element of self.radii is largest radius!
         for i, rad in enumerate(self.radii):
             # Using a cosine threshold instead!
-            if i == 0:
-                x = 0
+            if rad>=self.r_detector:
+                x = 1.
             else:
-                x = - np.sqrt(1 - (rad**2 / self.r_detector**2))
+                x = -np.sqrt(1 - (rad**2 / self.r_detector**2))
             coszen_limit.append(x)
         self.coszen_limit = np.array(coszen_limit, dtype=FTYPE)
+
+
 
     def calcLayers(self, cz):
         """
@@ -340,12 +318,7 @@ class Layers(object):
             r_detector=self.r_detector,
             prop_height=self.prop_height,
             detector_depth=self.detector_depth,
-            max_layers=self.max_layers,
-            min_detector_depth=self.min_detector_depth,
             rhos=self.rhos,
-            YeFrac=self.YeFrac,
-            YeOuterRadius=self.YeOuterRadius,
-            default_elec_frac=self.default_elec_frac,
             coszen_limit=self.coszen_limit,
             radii=self.radii
         )
@@ -379,30 +352,48 @@ class Layers(object):
         cz : cos(zenith angle), either single float value or an array of float values
 
         """
-        pathlength = []
+        r_prop = self.r_detector + self.detector_depth + self.prop_height
 
-        for this_cz in (cz if hasattr(cz,"__len__") else [cz] ) :
+        if not hasattr(cz,"__len__"):
+            cz = np.array([cz])
+        else:
+            cz = np.array(cz)
 
-            if this_cz < 0:
-                this_pathlength = np.sqrt(
-                    (self.r_detector + self.prop_height + self.detector_depth) * \
-                    (self.r_detector + self.prop_height + self.detector_depth) - \
-                    (self.r_detector*self.r_detector)*(1 - this_cz*this_cz)
-                ) - self.r_detector*this_cz
-            else:
-                kappa = (self.detector_depth + self.prop_height)/self.r_detector
-                this_pathlength = self.r_detector * np.sqrt(
-                    this_cz*this_cz - 1 + (1 + kappa)*(1 + kappa)
-                ) - self.r_detector*this_cz
-
-            pathlength.append(this_pathlength)
-
-        pathlength = np.asarray(pathlength)
+        pathlength = -self.r_detector*cz + np.sqrt(self.r_detector**2.*cz**2 - (self.r_detector**2. - r_prop**2.))
 
         self._distance = pathlength
 
+    def weight_density_to_YeFrac(self):
+        '''
+        Adjust the densities of the provided earth model layers
+        for the different electorn fractions in the inner core,
+        outer core and mantle.
+        '''
 
-def test_Layers():
+        # TODO make this generic
+        R_INNER = 1221.5
+        R_OUTER = 3480.
+        R_MANTLE= 6371. # the crust is assumed to have the same electron fraction as the mantle
+
+        assert isinstance(self.YeFrac, np.ndarray) and self.YeFrac.shape[0]==3, 'ERROR: YeFrac must be an array of size 3'
+        #
+        # TODO: insert extra radii is the electron density boundaries
+        #       don't match the current layer boundaries
+        
+        #
+        # Weight the density properly
+        #
+        density_inner = self.rhos*self.YeFrac[0]*(self.radii<=R_INNER)
+        density_outer = self.rhos*self.YeFrac[1]*(self.radii<=R_OUTER)*(self.radii>R_INNER)
+        density_mantle = self.rhos*self.YeFrac[2]*(self.radii<=R_MANTLE)*(self.radii>R_OUTER)
+
+        weighted_densities = density_inner+density_outer+density_mantle
+        
+        self.rhos=weighted_densities
+
+
+
+def test_layers():
 
     logging.info('Test layers calculation:')
     layer = Layers('osc/PREM_4layer.dat')
@@ -422,7 +413,92 @@ def test_Layers():
 
     logging.info('<< PASS : test_Layers >>')
 
+def test_layers_II():
+    '''
+    Validate the total distance travered,
+    the number of layers crossed and the distance
+    travelled in each of these layers, for 
+    neutrinos coming from various zenith angles
+
+    also test separately the calculation of critical
+    zenith boundaries for any particular layer, as
+    calculated by computeMinLengthToLayers
+    '''
+    from pisa.utils.comparisons import ALLCLOSE_KW
+    #
+    # The test file is a 4-layer PREM Earth model. The
+    # file contains the following information:
+    #
+    # Distance to Earth's core [km]     density []
+    # -----------------------------     ----------
+    #               0.                     13.0
+    #             1220.0                   13.0
+    #             3480.0                   11.3
+    #             5701.0                   5.0
+    #             6371.0                   3.3
+    #
+    # Note that the order of these values is inverted in 
+    # layer.radii, so the first element in this object
+    # will be 6371
+
+    # TEST I: critical coszen values
+    #
+    # For each layer, the angle at which a neutrino track will
+    # become tangeant to a layer boundary can be calculated as
+    # follow:
+    #
+    # cos(theta) = -np.sqrt(1-r_n**2/R_detector**2)
+    #
+    # where the negative value is taken because the zenith angle 
+    # is larger than pi/2
+    #
+    # Note that if the layer is above the detector depth,
+    # The critical coszen is set to 0.
+    #
+    layer = Layers('osc/PREM_4layer.dat', detector_depth=1., prop_height=20.)
+    logging.info('detector depth = %s km' %layer.detector_depth)
+    logging.info('Detector radius = %s km'%layer.r_detector)
+    logging.info('Neutrino production height = %s km'%layer.prop_height)
+    layer.computeMinLengthToLayers()
+    ref_cz_crit = np.array([1., 1., -0.4461133826191877, -0.8375825182106081, -0.9814881717430358,  -1.])
+    assert np.allclose(layer.coszen_limit, ref_cz_crit, **ALLCLOSE_KW), f'test:\n{layer.coszen_limit}\n!= ref:\n{ref_cz_crit}'
+
+    #
+    # TEST II: Verify total path length
+    #
+    # The total pathe length is given by:
+    #
+    # -r_detector*cz + np.sqrt(r_detector**2.*cz**2 - (r_detector**2. - r_prop**2.))
+    #
+    # where r_detector is the radius distance of
+    # the detector, and r_prop is the radius
+    # at which neutrinos are produced
+    input_cz = np.cos(np.array([0., 36.*np.pi/180., 63.*np.pi/180., \
+                         np.pi/2., 105.*np.pi/180., 125.*np.pi/180., \
+                         170*np.pi/180., np.pi]))
+
+    correct_length = np.array([21., 25.934954968613056, 45.9673929915939,517.6688130455607,\
+                              3376.716060094899, 7343.854310588515,12567.773643090592, 12761.])
+    layer.calcPathLength(input_cz)
+    computed_length = layer._distance
+    assert np.allclose(computed_length, correct_length, **ALLCLOSE_KW), f'test:\n{computed_length}\n!= ref:\n{correct_length}'
+
+    #
+    # TEST III: check the individual path distances crossed
+    #           for the previous input cosines
+    #
+    # For negative values of coszen, the distance crossed in a layer i is:
+    #
+    # d_i = R_p*cos(alpha) + sqrt(Rp**2cos(alpha)**2 - (Rp**2-r1**2)))
+    #
+    # where Rp is the production radius, r1 is the outer limit of a layer
+    # and alpha is an angle that relates to the total path D and zenith 
+    # theta via the sine law:
+    #
+    # sin(alpha) = sin(pi-theta)*D /Rp
+    #
+
 
 if __name__ == '__main__':
     set_verbosity(3)
-    test_Layers()
+    test_layers_II()
