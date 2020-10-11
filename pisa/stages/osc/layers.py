@@ -98,8 +98,8 @@ def extCalcLayers(cz,
             cumulative_distances = -r_detector*coszen + np.sqrt(r_detector**2.*coszen**2. -r_detector**2. + radii[:I]**2.)
             # a bit of flippy business is done here to order terms
             # such that numpy diff can work
-            segments_lengths= np.flip(np.diff(np.concatenate([np.array([0.]), np.flip(cumulative_distances)])))
-
+            segments_lengths = np.diff(np.concatenate([np.array([0.]), cumulative_distances[::-1]]))
+            segments_lengths = segments_lengths[::-1]
             segments_lengths = np.concatenate([segments_lengths, np.zeros(radii.shape[0]-I)])
             rhos*=(segments_lengths>0.)
             density = np.concatenate([rhos, np.zeros(radii.shape[0]-I)])
@@ -393,7 +393,7 @@ class Layers(object):
 
 
 
-def test_layers():
+def test_layers_1():
 
     logging.info('Test layers calculation:')
     layer = Layers('osc/PREM_4layer.dat')
@@ -413,7 +413,7 @@ def test_layers():
 
     logging.info('<< PASS : test_Layers >>')
 
-def test_layers_II():
+def test_layers_2():
     '''
     Validate the total distance travered,
     the number of layers crossed and the distance
@@ -461,6 +461,7 @@ def test_layers_II():
     logging.info('Neutrino production height = %s km'%layer.prop_height)
     layer.computeMinLengthToLayers()
     ref_cz_crit = np.array([1., 1., -0.4461133826191877, -0.8375825182106081, -0.9814881717430358,  -1.])
+    logging.debug('Asserting Critical coszen values...')
     assert np.allclose(layer.coszen_limit, ref_cz_crit, **ALLCLOSE_KW), f'test:\n{layer.coszen_limit}\n!= ref:\n{ref_cz_crit}'
 
     #
@@ -481,6 +482,7 @@ def test_layers_II():
                               3376.716060094899, 7343.854310588515,12567.773643090592, 12761.])
     layer.calcPathLength(input_cz)
     computed_length = layer._distance
+    logging.debug('Testing full path in vacuum calculations...')
     assert np.allclose(computed_length, correct_length, **ALLCLOSE_KW), f'test:\n{computed_length}\n!= ref:\n{correct_length}'
 
     #
@@ -497,8 +499,9 @@ def test_layers_II():
     #
     # sin(alpha) = sin(pi-theta)*D /Rp
     #
-
+    logging.debug('Testing Earth layer segments and density computations...')
 
 if __name__ == '__main__':
     set_verbosity(3)
-    test_layers_II()
+    test_layers_1()
+    test_layers_2()
