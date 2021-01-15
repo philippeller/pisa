@@ -95,14 +95,14 @@ def extCalcLayers(cz,
         # Deal with paths that do not have tangeants
         #
         if coszen>=coszen_limit[I]: 
-            cumulative_distances = -r_detector*coszen + np.sqrt(r_detector**2.*coszen**2. -r_detector**2. + radii[:I]**2.)
+            cumulative_distances = -r_detector * coszen + np.sqrt(r_detector**2. * coszen**2. - r_detector**2. + radii[:I]**2.)
             # a bit of flippy business is done here to order terms
             # such that numpy diff can work
-            segments_lengths = np.diff(np.concatenate([np.array([0.]), cumulative_distances[::-1]]))
+            segments_lengths = np.diff(np.concatenate((np.array([0.], dtype=FTYPE), cumulative_distances[::-1])))
             segments_lengths = segments_lengths[::-1]
-            segments_lengths = np.concatenate([segments_lengths, np.zeros(radii.shape[0]-I)])
-            rhos*=(segments_lengths>0.)
-            density = np.concatenate([rhos, np.zeros(radii.shape[0]-I)])
+            segments_lengths = np.concatenate((segments_lengths, np.zeros(radii.shape[0] - I, dtype=FTYPE)))
+            rhos *= (segments_lengths > 0.)
+            density = np.concatenate((rhos, np.zeros(radii.shape[0] - I, dtype=FTYPE)))
 
             #print('diff with total path', np.sum(segment_distances)-path_len) # CHECKED
 
@@ -114,8 +114,8 @@ def extCalcLayers(cz,
             calculate_small_root = (coszen<coszen_limit)*(coszen_limit<=coszen_limit[I])
             calculate_large_root = (coszen_limit>coszen)
 
-            small_roots = -r_detector*coszen*calculate_small_root - np.sqrt(r_detector**2*coszen**2 - r_detector**2+ radii**2, where=calculate_small_root, out=np.zeros_like(radii))
-            large_roots = -r_detector*coszen*calculate_large_root + np.sqrt(r_detector**2*coszen**2 - r_detector**2+ radii**2, where=calculate_large_root, out=np.zeros_like(radii))
+            small_roots = -r_detector*coszen*calculate_small_root - np.sqrt(r_detector**2*coszen**2 - r_detector**2+ radii**2) #, where=calculate_small_root, out=np.zeros_like(radii))
+            large_roots = -r_detector*coszen*calculate_large_root + np.sqrt(r_detector**2*coszen**2 - r_detector**2+ radii**2) #, where=calculate_large_root, out=np.zeros_like(radii))
 
             #
             # concatenate large and small roots together
@@ -129,7 +129,7 @@ def extCalcLayers(cz,
             # layer (N-1), then layer(N-2)...). This layer ends with
             # the two large roots of the layers above the detector height
             #
-            full_distances = np.concatenate([small_roots, np.flip(large_roots)])
+            full_distances = np.concatenate((small_roots, large_roots[::-1]))
 
             # The above vector gives the cumulative distance travelled
             # after passing each layer, starting from the detector and 
@@ -150,13 +150,13 @@ def extCalcLayers(cz,
             #
             # arange the densities to match the segment array structure
             #
-            density = np.concatenate([rhos,np.flip(rhos)])
+            density = np.concatenate((rhos, rhos[::-1]))
             density*=(segments_lengths>0.)
             #
             # To respect the order at which layers are crossed, all these array must be flipped
             #
-            segments_lengths = np.flip(segments_lengths)
-            density = np.flip(density)
+            segments_lengths = segments_lengths[::-1]
+            density = density[::-1]
 
         n_layers = np.sum(segments_lengths>0.,dtype=np.float64)
 
@@ -223,8 +223,8 @@ class Layers(object):
             self.max_layers = 2 * n_prem + 1
 
             # Add an external layer corresponding to the atmosphere / production boundary
-            self.radii = np.concatenate([np.array([r_earth+prop_height]), self.radii])
-            self.rhos  = np.concatenate([np.zeros(1, dtype=FTYPE), self.rhos])
+            self.radii = np.concatenate((np.array([r_earth+prop_height]), self.radii))
+            self.rhos  = np.concatenate((np.zeros(1, dtype=FTYPE), self.rhos))
 
         else :
             self.using_earth_model = False
