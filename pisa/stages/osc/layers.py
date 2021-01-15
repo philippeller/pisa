@@ -78,31 +78,26 @@ def extCalcLayers(cz,
     """
 
     # Loop over all CZ values
-    for k, coszen in enumerate(cz):
+    for coszen in cz:
 
         r_prop = r_detector+detector_depth+prop_height
         # Compute the full path length
-        path_len = -r_detector*coszen + np.sqrt(r_detector**2.*coszen**2 - (r_detector**2. - r_prop**2.))
+        # path_len = -r_detector * coszen + np.sqrt(r_detector**2. * coszen**2 - (r_detector**2. - r_prop**2.))
 
-
-        # 
         # Determine if there will be a crossing of layer
-        # I is the index of the first inner layer
-        I = np.where(radii<r_detector)[0][0]
-        first_inner_layer = radii[I]
+        # idx is the index of the first inner layer
+        idx = np.where(radii<r_detector)[0][0]
 
-        #
         # Deal with paths that do not have tangeants
-        #
-        if coszen>=coszen_limit[I]: 
-            cumulative_distances = -r_detector * coszen + np.sqrt(r_detector**2. * coszen**2. - r_detector**2. + radii[:I]**2.)
+        if coszen >= coszen_limit[idx]: 
+            cumulative_distances = -r_detector * coszen + np.sqrt(r_detector**2. * coszen**2. - r_detector**2. + radii[:idx]**2.)
             # a bit of flippy business is done here to order terms
             # such that numpy diff can work
             segments_lengths = np.diff(np.concatenate((np.array([0.], dtype=FTYPE), cumulative_distances[::-1])))
             segments_lengths = segments_lengths[::-1]
-            segments_lengths = np.concatenate((segments_lengths, np.zeros(radii.shape[0] - I, dtype=FTYPE)))
+            segments_lengths = np.concatenate((segments_lengths, np.zeros(radii.shape[0] - idx, dtype=FTYPE)))
             rhos *= (segments_lengths > 0.)
-            density = np.concatenate((rhos, np.zeros(radii.shape[0] - I, dtype=FTYPE)))
+            density = np.concatenate((rhos, np.zeros(radii.shape[0] - idx, dtype=FTYPE)))
 
             #print('diff with total path', np.sum(segment_distances)-path_len) # CHECKED
 
@@ -111,11 +106,11 @@ def extCalcLayers(cz,
             # Figure out how many layers are crossed twice
             # (meaning we calculate the negative root for these layers)
             #
-            calculate_small_root = (coszen<coszen_limit)*(coszen_limit<=coszen_limit[I])
+            calculate_small_root = (coszen < coszen_limit) * (coszen_limit <= coszen_limit[idx])
             calculate_large_root = (coszen_limit>coszen)
 
-            small_roots = -r_detector*coszen*calculate_small_root - np.sqrt(r_detector**2*coszen**2 - r_detector**2+ radii**2) #, where=calculate_small_root, out=np.zeros_like(radii))
-            large_roots = -r_detector*coszen*calculate_large_root + np.sqrt(r_detector**2*coszen**2 - r_detector**2+ radii**2) #, where=calculate_large_root, out=np.zeros_like(radii))
+            small_roots = - r_detector * coszen * calculate_small_root - np.sqrt(r_detector**2 * coszen**2 - r_detector**2 + radii**2) #, where=calculate_small_root, out=np.zeros_like(radii))
+            large_roots = - r_detector * coszen * calculate_large_root + np.sqrt(r_detector**2 * coszen**2 - r_detector**2 + radii**2) #, where=calculate_large_root, out=np.zeros_like(radii))
 
             #
             # concatenate large and small roots together
@@ -138,27 +133,27 @@ def extCalcLayers(cz,
             # nonzero distances in this array. This requires a couple of
             # less elegant manipulations
             #
-            non_zero_indices = np.where(full_distances>0)[0]
+            non_zero_indices = np.where(full_distances > 0)[0]
             segments_lengths = np.zeros_like(full_distances)
-            for ii,i in enumerate(non_zero_indices):
-                if ii==0:
+            for i in range(len(non_zero_indices)):
+                if i==0:
                     segments_lengths[i] = full_distances[i]
                 else:
-                    previous_i = non_zero_indices[ii-1]
-                    segments_lengths[i] = full_distances[i]-full_distances[previous_i]
+                    previous_i = non_zero_indices[i - 1]
+                    segments_lengths[i] = full_distances[i] - full_distances[previous_i]
 
             #
             # arange the densities to match the segment array structure
             #
             density = np.concatenate((rhos, rhos[::-1]))
-            density*=(segments_lengths>0.)
+            density*=(segments_lengths > 0.)
             #
             # To respect the order at which layers are crossed, all these array must be flipped
             #
             segments_lengths = segments_lengths[::-1]
             density = density[::-1]
 
-        n_layers = np.sum(segments_lengths>0.,dtype=np.float64)
+        n_layers = np.sum(segments_lengths > 0., dtype=np.float64)
 
     return n_layers, density.ravel(), segments_lengths.ravel()
 
@@ -215,8 +210,8 @@ class Layers(object):
             # w.r.t the file. The first elements of the arrays below corresponds
             # the Earth's surface, and the floowing numbers go deeper toward the 
             # planet's core
-            self.rhos = prem[...,1][::-1].astype(FTYPE)
-            self.radii = prem[...,0][::-1].astype(FTYPE)
+            self.rhos = prem[..., 1][::-1].astype(FTYPE)
+            self.radii = prem[..., 0][::-1].astype(FTYPE)
             r_earth = prem[-1][0]
             self.default_elec_frac = 0.5
             n_prem = len(self.radii) - 1
@@ -234,9 +229,9 @@ class Layers(object):
         #
         # Make some checks about the input production height and detector depth
         #
-        assert detector_depth>0, 'ERROR: detector depth must be a positive value'
-        assert detector_depth<=r_earth, 'ERROR: detector depth is deeper than one Earth radius!'
-        assert prop_height>=0, 'ERROR: neutrino production height must be positive'
+        assert detector_depth > 0, 'ERROR: detector depth must be a positive value'
+        assert detector_depth <= r_earth, 'ERROR: detector depth is deeper than one Earth radius!'
+        assert prop_height >= 0, 'ERROR: neutrino production height must be positive'
 
         # Set some other
         self.r_detector = r_earth - detector_depth
@@ -290,10 +285,10 @@ class Layers(object):
         # First element of self.radii is largest radius!
         for i, rad in enumerate(self.radii):
             # Using a cosine threshold instead!
-            if rad>=self.r_detector:
+            if rad >= self.r_detector:
                 x = 1.
             else:
-                x = -np.sqrt(1 - (rad**2 / self.r_detector**2))
+                x = - np.sqrt(1 - (rad**2 / self.r_detector**2))
             coszen_limit.append(x)
         self.coszen_limit = np.array(coszen_limit, dtype=FTYPE)
 
@@ -359,7 +354,7 @@ class Layers(object):
         else:
             cz = np.array(cz)
 
-        pathlength = -self.r_detector*cz + np.sqrt(self.r_detector**2.*cz**2 - (self.r_detector**2. - r_prop**2.))
+        pathlength = - self.r_detector * cz + np.sqrt(self.r_detector**2. * cz**2 - (self.r_detector**2. - r_prop**2.))
 
         self._distance = pathlength
 
@@ -375,7 +370,7 @@ class Layers(object):
         R_OUTER = 3480.
         R_MANTLE= 6371. # the crust is assumed to have the same electron fraction as the mantle
 
-        assert isinstance(self.YeFrac, np.ndarray) and self.YeFrac.shape[0]==3, 'ERROR: YeFrac must be an array of size 3'
+        assert isinstance(self.YeFrac, np.ndarray) and self.YeFrac.shape[0] == 3, 'ERROR: YeFrac must be an array of size 3'
         #
         # TODO: insert extra radii is the electron density boundaries
         #       don't match the current layer boundaries
@@ -383,13 +378,13 @@ class Layers(object):
         #
         # Weight the density properly
         #
-        density_inner = self.rhos*self.YeFrac[0]*(self.radii<=R_INNER)
-        density_outer = self.rhos*self.YeFrac[1]*(self.radii<=R_OUTER)*(self.radii>R_INNER)
-        density_mantle = self.rhos*self.YeFrac[2]*(self.radii<=R_MANTLE)*(self.radii>R_OUTER)
+        density_inner = self.rhos * self.YeFrac[0] * (self.radii <= R_INNER)
+        density_outer = self.rhos * self.YeFrac[1] * (self.radii <= R_OUTER) * (self.radii > R_INNER)
+        density_mantle = self.rhos * self.YeFrac[2] * (self.radii <= R_MANTLE) * (self.radii > R_OUTER)
 
-        weighted_densities = density_inner+density_outer+density_mantle
+        weighted_densities = density_inner + density_outer + density_mantle
         
-        self.rhos=weighted_densities
+        self.rhos = weighted_densities
 
 
 
@@ -474,12 +469,12 @@ def test_layers_2():
     # where r_detector is the radius distance of
     # the detector, and r_prop is the radius
     # at which neutrinos are produced
-    input_cz = np.cos(np.array([0., 36.*np.pi/180., 63.*np.pi/180., \
-                         np.pi/2., 105.*np.pi/180., 125.*np.pi/180., \
-                         170*np.pi/180., np.pi]))
+    input_cz = np.cos(np.array([0., 36.* np.pi / 180., 63. * np.pi / 180., \
+                         np.pi/2., 105.* np.pi / 180., 125. * np.pi / 180., \
+                         170 * np.pi / 180., np.pi]))
 
-    correct_length = np.array([21., 25.934954968613056, 45.9673929915939,517.6688130455607,\
-                              3376.716060094899, 7343.854310588515,12567.773643090592, 12761.])
+    correct_length = np.array([21., 25.934954968613056, 45.9673929915939, 517.6688130455607,\
+                              3376.716060094899, 7343.854310588515, 12567.773643090592, 12761.])
     layer.calcPathLength(input_cz)
     computed_length = layer._distance
     logging.debug('Testing full path in vacuum calculations...')
